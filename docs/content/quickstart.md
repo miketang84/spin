@@ -16,9 +16,19 @@ You can download the [latest release](https://github.com/fermyon/spin/releases).
 For example, for an Apple silicon macOS machine:
 
 ```
-$ wget https://github.com/fermyon/spin/releases/download/v0.2.0/spin-v0.2.0-macos-aarch64.tar.gz
-$ tar xfv spin-v0.2.0-macos-aarch64.tar.gz
+$ wget https://github.com/fermyon/spin/releases/download/v0.3.0/spin-v0.3.0-macos-aarch64.tar.gz
+$ tar xfv spin-v0.3.0-macos-aarch64.tar.gz
 $ ./spin --help
+```
+
+If you have [`cargo`](https://doc.rust-lang.org/cargo/getting-started/installation.html), you can clone the repo and install it to your path:
+
+```bash
+$ git clone https://github.com/fermyon/spin -b v0.3.0
+$ cd spin
+$ rustup target add wasm32-wasi
+$ cargo install --path .
+$ spin --help
 ```
 
 Alternatively, [follow the contribution document](./contributing.md) for a detailed guide
@@ -83,9 +93,8 @@ Installing template http-go...
 Let's create a new Spin application based on the Rust HTTP template:
 
 ```console
-$ spin new http-rust
+$ spin new http-rust spin-hello-world
 Project description: A simple Spin HTTP component in Rust
-Project name: spin-hello-world
 HTTP base: /
 HTTP path: /hello
 $ tree

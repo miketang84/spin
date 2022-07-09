@@ -12,8 +12,9 @@ use spin_manifest::{HttpTriggerConfiguration, TriggerConfig};
 use std::fs::File;
 use std::io::copy;
 use std::path::PathBuf;
+use url::Url;
 
-use crate::{opts::*, parse_buildinfo};
+use crate::{opts::*, parse_buildinfo, sloth::warn_if_slow_response};
 
 /// Package and upload Spin artifacts, notifying Hippo
 #[derive(Parser, Debug)]
@@ -99,7 +100,7 @@ pub struct DeployCommand {
     /// Disable attaching buildinfo
     #[clap(
         long = "no-buildinfo",
-        conflicts_with = "buildinfo",
+        conflicts_with = BUILDINFO_OPT,
         env = "SPIN_DEPLOY_NO_BUILDINFO"
     )]
     pub no_buildinfo: bool,
@@ -113,7 +114,7 @@ pub struct DeployCommand {
     pub buildinfo: Option<BuildMetadata>,
 
     /// Deploy existing bindle if it already exists on bindle server
-    #[clap(short = 'd', long = "deploy-existing-bindle")]
+    #[clap(short = 'e', long = "deploy-existing-bindle")]
     pub redeploy: bool,
 }
 
@@ -131,7 +132,11 @@ impl DeployCommand {
             None
         };
 
+        self.check_hippo_healthz().await?;
+
         let bindle_id = self.create_and_push_bindle(buildinfo).await?;
+
+        let _sloth_warning = warn_if_slow_response(&self.hippo_server_url);
 
         let token = match Client::login(
             &Client::new(ConnectionInfo {
@@ -181,7 +186,6 @@ impl DeployCommand {
         .await
         .context("Problem creating a channel in Hippo")?;
 
-        Client::add_revision(&hippo_client, name.clone(), bindle_id.version_string()).await?;
         println!(
             "Deployed {} version {}",
             name.clone(),
@@ -191,7 +195,12 @@ impl DeployCommand {
             .await
             .context("Problem getting channel by id")?;
         if let Ok(http_config) = HttpTriggerConfiguration::try_from(cfg.info.trigger.clone()) {
-            print_available_routes(&channel.domain, &http_config.base, &cfg);
+            print_available_routes(
+                &channel.domain,
+                &http_config.base,
+                &self.hippo_server_url,
+                &cfg,
+            );
         } else {
             println!("Application is running at {}", channel.domain);
         }
@@ -201,11 +210,19 @@ impl DeployCommand {
 
     async fn compute_buildinfo(&self, cfg: &RawAppManifest) -> Result<BuildMetadata> {
         let mut sha256 = Sha256::new();
+        let app_folder = self.app.parent().with_context(|| {
+            anyhow!(
+                "Cannot get a parent directory of manifest file {}",
+                &self.app.display()
+            )
+        })?;
 
         for x in cfg.components.iter() {
             match &x.source {
                 config::RawModuleSource::FileReference(p) => {
-                    let mut r = File::open(p)?;
+                    let full_path = app_folder.join(p);
+                    let mut r = File::open(&full_path)
+                        .with_context(|| anyhow!("Cannot open file {}", &full_path.display()))?;
                     copy(&mut r, &mut sha256)?;
                 }
                 config::RawModuleSource::Bindle(_b) => {}
@@ -266,6 +283,8 @@ impl DeployCommand {
             .await
             .with_context(|| crate::write_failed_msg(bindle_id, dest_dir))?;
 
+        let _sloth_warning = warn_if_slow_response(&self.bindle_server_url);
+
         let publish_result =
             spin_publish::push_all(&dest_dir, bindle_id, bindle_connection_info).await;
 
@@ -284,17 +303,37 @@ impl DeployCommand {
                     ));
                 }
             } else {
-                return Err(anyhow!("Failed to push bindle to server {}", publish_err));
+                return Err(publish_err).with_context(|| {
+                    format!(
+                        "Failed to push bindle {} to server {}",
+                        bindle_id, self.bindle_server_url
+                    )
+                });
             }
         }
 
         Ok(bindle_id.clone())
+    }
+
+    async fn check_hippo_healthz(&self) -> Result<()> {
+        let hippo_base_url = url::Url::parse(&self.hippo_server_url)?;
+        let hippo_healthz_url = hippo_base_url.join("/healthz")?;
+        let result = reqwest::get(hippo_healthz_url.to_string())
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+        if result != "Healthy" {
+            return Err(anyhow!("Hippo server {} is unhealthy", hippo_base_url));
+        }
+        Ok(())
     }
 }
 
 fn print_available_routes(
     address: &str,
     base: &str,
+    hippo_url: &str,
     cfg: &spin_loader::local::config::RawAppManifest,
 ) {
     if cfg.components.is_empty() {
@@ -304,8 +343,14 @@ fn print_available_routes(
     println!("Available Routes:");
     for component in &cfg.components {
         if let TriggerConfig::Http(http_cfg) = &component.trigger {
+            let url_result = Url::parse(hippo_url);
+            let scheme = match &url_result {
+                Ok(url) => url.scheme(),
+                Err(_) => "http",
+            };
+
             let route = RoutePattern::from(base, &http_cfg.route);
-            println!("  {}: http://{}{}", component.id, address, route);
+            println!("  {}: {}://{}{}", component.id, scheme, address, route);
             if let Some(description) = &component.description {
                 println!("    {}", description);
             }
