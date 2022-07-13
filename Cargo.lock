@@ -3612,7 +3612,7 @@ dependencies = [
 
 [[package]]
 name = "spin-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3658,6 +3658,7 @@ dependencies = [
  "vergen",
  "wasi-outbound-http",
  "wasmtime",
+ "which",
 ]
 
 [[package]]
@@ -3839,7 +3840,7 @@ dependencies = [
 
 [[package]]
 name = "spin-sdk"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bytes 1.1.0",
@@ -5240,6 +5241,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "552ceb903e957524388c4d3475725ff2c8b7960922063af6ce53c9a43da07449"
 dependencies = [
  "webpki 0.22.0",
+]
+
+[[package]]
+name = "which"
+version = "4.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c4fb54e6113b6a8772ee41c3404fb0301ac79604489467e0a9ce1f3e97c24ae"
+dependencies = [
+ "either",
+ "lazy_static",
+ "libc",
 ]
 
 [[package]]
